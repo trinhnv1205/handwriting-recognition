@@ -2,45 +2,19 @@ import os
 import numpy as np
 import tensorflow as keras
 from tensorflow.keras import layers, models
-import tensorflow_datasets as tfds
 import json
+import sys
+
+# Add parent directory to path to import train_dataset
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from train_dataset import load_emnist_data
 
 # Tạo thư mục model nếu chưa tồn tại
 if not os.path.exists('model'):
     os.makedirs('model')
 
-print("Đang tải dữ liệu EMNIST (balanced) từ tensorflow_datasets...")
 # Tải dữ liệu
-ds_train, ds_test = tfds.load('emnist/balanced', split=['train', 'test'], shuffle_files=True, as_supervised=True)
-
-# Chuyển đổi sang numpy array để dễ xử lý (hoặc dùng tf.data pipeline)
-# Vì dữ liệu không quá lớn, ta có thể load hết vào RAM
-def dataset_to_numpy(ds):
-    images = []
-    labels = []
-    for img, label in tfds.as_numpy(ds):
-        images.append(img)
-        labels.append(label)
-    return np.array(images), np.array(labels)
-
-print("Converting dataset to numpy...")
-images_train, labels_train = dataset_to_numpy(ds_train)
-images_test, labels_test = dataset_to_numpy(ds_test)
-
-print(f"Train shape: {images_train.shape}, Labels: {labels_train.shape}")
-print(f"Test shape: {images_test.shape}, Labels: {labels_test.shape}")
-
-# EMNIST images in TFDS are also rotated 90 degrees and flipped.
-# They come as (28, 28, 1).
-# We need to transpose them.
-# Transpose (N, 28, 28, 1) -> (N, 28, 28, 1) swapping axis 1 and 2
-# Note: images are (N, H, W, C). We want to swap H and W.
-images_train = np.transpose(images_train, (0, 2, 1, 3))
-images_test = np.transpose(images_test, (0, 2, 1, 3))
-
-# Normalize to 0-1 range
-images_train = images_train.astype('float32') / 255.0
-images_test = images_test.astype('float32') / 255.0
+(images_train, labels_train), (images_test, labels_test) = load_emnist_data()
 
 # Số lượng lớp
 num_classes = 47
