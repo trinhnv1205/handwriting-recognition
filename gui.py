@@ -9,136 +9,248 @@ import pytesseract
 import time
 import glob
 import easyocr
+import subprocess
+import platform
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QPushButton, QLabel, QTabWidget,
+                             QHBoxLayout, QPushButton, QLabel, QStackedWidget,
                              QFileDialog, QMessageBox, QFrame, QRadioButton, QButtonGroup,
-                             QInputDialog, QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect)
+                             QLineEdit, QProgressBar)
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont, QIcon, QCursor
-from PyQt6.QtCore import Qt, QPoint, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QPoint, QSize, QTimer, QThread, pyqtSignal
 
-# --- Professional Color Palette (Dracula-inspired but cleaner) ---
+# --- Design Colors ---
 COLORS = {
-    "bg": "#F4F7FE",          # Light Grey-Blue Background
-    "card_bg": "#FFFFFF",     # White Cards
-    "text_primary": "#2B3674",# Dark Blue Text
-    "text_secondary": "#A3AED0", # Grey Text
-    "accent": "#4318FF",      # Bright Blue Accent
-    "accent_hover": "#3311CC",
-    "success": "#05CD99",     # Green
-    "warning": "#FFB547",     # Orange
-    "danger": "#EE5D50",      # Red
-    "border": "#E0E5F2"       # Light Border
+    "bg_main": "#212121",       # Dark Grey Background
+    "bg_card": "#2C2C2C",       # Slightly lighter card bg
+    "bg_input": "#383838",      # Input field bg
+    "text_main": "#FFFFFF",
+    "text_dim": "#AAAAAA",
+    "accent_cyan": "#00E5FF",   # Header Text
+    "btn_green": "#00B894",     # Save/Recognize
+    "btn_green_hover": "#00A383",
+    "btn_blue": "#0984E3",      # Upload/Folder
+    "btn_blue_hover": "#0870C0",
+    "btn_orange": "#E17055",    # Clear
+    "btn_orange_hover": "#D35400",
+    "toggle_active": "#00E5FF",
+    "toggle_inactive": "#555555"
 }
 
 STYLESHEET = f"""
     QMainWindow {{
-        background-color: {COLORS["bg"]};
+        background-color: {COLORS["bg_main"]};
     }}
     QWidget {{
-        font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-        color: {COLORS["text_primary"]};
+        font-family: 'Segoe UI', 'Roboto', sans-serif;
+        color: {COLORS["text_main"]};
         font-size: 14px;
     }}
 
-    /* Cards */
+    /* Frames & Cards */
     QFrame#card {{
-        background-color: {COLORS["card_bg"]};
-        border-radius: 20px;
-        border: 1px solid {COLORS["border"]};
+        background-color: {COLORS["bg_card"]};
+        border-radius: 15px;
+        border: 1px solid #333;
+    }}
+
+    /* Headers */
+    QLabel#header_title {{
+        font-size: 24px;
+        font-weight: bold;
+        color: {COLORS["accent_cyan"]};
     }}
 
     /* Buttons */
     QPushButton {{
-        background-color: {COLORS["accent"]};
-        color: white;
-        border-radius: 12px;
-        padding: 12px 20px;
-        font-weight: 600;
+        border-radius: 8px;
+        padding: 10px 20px;
+        font-weight: bold;
+        font-size: 14px;
         border: none;
-    }}
-    QPushButton:hover {{
-        background-color: {COLORS["accent_hover"]};
-    }}
-    QPushButton:pressed {{
-        background-color: {COLORS["text_primary"]};
-    }}
-    QPushButton#secondary {{
-        background-color: transparent;
-        color: {COLORS["text_primary"]};
-        border: 1px solid {COLORS["border"]};
-    }}
-    QPushButton#secondary:hover {{
-        background-color: {COLORS["bg"]};
-    }}
-    QPushButton#danger {{
-        background-color: {COLORS["danger"]};
         color: white;
     }}
-    QPushButton#danger:hover {{
-        background-color: #D44035;
+    QPushButton#btn_green {{
+        background-color: {COLORS["btn_green"]};
+    }}
+    QPushButton#btn_green:hover {{
+        background-color: {COLORS["btn_green_hover"]};
     }}
 
-    /* Tabs */
-    QTabWidget::pane {{
-        border: none;
-        background: transparent;
+    QPushButton#btn_blue {{
+        background-color: {COLORS["btn_blue"]};
     }}
-    QTabBar::tab {{
-        background: transparent;
-        color: {COLORS["text_secondary"]};
-        padding: 10px 20px;
-        font-weight: 600;
-        font-size: 16px;
-        border-bottom: 3px solid transparent;
-        margin-bottom: 10px;
+    QPushButton#btn_blue:hover {{
+        background-color: {COLORS["btn_blue_hover"]};
     }}
-    QTabBar::tab:selected {{
-        color: {COLORS["accent"]};
-        border-bottom: 3px solid {COLORS["accent"]};
+
+    QPushButton#btn_orange {{
+        background-color: {COLORS["btn_orange"]};
     }}
-    QTabBar::tab:hover {{
-        color: {COLORS["accent"]};
+    QPushButton#btn_orange:hover {{
+        background-color: {COLORS["btn_orange_hover"]};
+    }}
+
+    /* Toggle Buttons */
+    QPushButton#toggle_btn {{
+        background-color: {COLORS["toggle_inactive"]};
+        color: #DDD;
+        border-radius: 15px;
+        padding: 5px 20px;
+        font-size: 12px;
+    }}
+    QPushButton#toggle_btn:checked {{
+        background-color: {COLORS["toggle_active"]};
+        color: #000;
+        font-weight: bold;
     }}
 
     /* Inputs */
-    QComboBox {{
-        background-color: {COLORS["bg"]};
-        border: 1px solid {COLORS["border"]};
-        border-radius: 10px;
-        padding: 8px 12px;
-        color: {COLORS["text_primary"]};
-    }}
-    QComboBox::drop-down {{
-        border: none;
-    }}
-
-    /* Labels */
-    QLabel#header {{
-        font-size: 24px;
-        font-weight: 700;
-        color: {COLORS["text_primary"]};
-    }}
-    QLabel#subheader {{
-        font-size: 14px;
-        font-weight: 500;
-        color: {COLORS["text_secondary"]};
-    }}
-    QLabel#result_box {{
-        background-color: {COLORS["bg"]};
-        border-radius: 15px;
-        padding: 20px;
+    QLineEdit {{
+        background-color: {COLORS["bg_input"]};
+        border: 1px solid #555;
+        border-radius: 5px;
+        padding: 10px;
+        color: white;
         font-size: 16px;
-        color: {COLORS["text_primary"]};
+        text-align: center;
     }}
 
-    /* Canvas */
-    QWidget#canvas_wrapper {{
-        border: 2px dashed {COLORS["border"]};
-        border-radius: 15px;
-        background-color: white;
+    /* Radio Buttons */
+    QRadioButton {{
+        font-size: 14px;
+    }}
+    QRadioButton::indicator {{
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        border: 2px solid #777;
+    }}
+    QRadioButton::indicator:checked {{
+        background-color: {COLORS["accent_cyan"]};
+        border-color: {COLORS["accent_cyan"]};
+    }}
+
+    /* Result Box */
+    QLabel#result_box {{
+        background-color: {COLORS["bg_input"]};
+        border-radius: 10px;
+        padding: 15px;
+        font-size: 16px;
+        font-weight: bold;
+        color: {COLORS["accent_cyan"]};
     }}
 """
+
+def preprocess_image(img_pil):
+    """
+    Preprocess image for EMNIST model:
+    1. Convert to grayscale
+    2. Invert if white background
+    3. Find bounding box of content
+    4. Crop and pad to square
+    5. Resize to 28x28 with padding (content ~20x20)
+    """
+    img_pil = img_pil.convert('L')
+    img_arr = np.array(img_pil)
+
+    # Invert if background is white (mean > 127)
+    if np.mean(img_arr) > 127:
+        img_arr = 255 - img_arr
+
+    # Threshold to find content
+    coords = np.argwhere(img_arr > 50)
+
+    if coords.size == 0:
+        return img_pil.resize((28, 28))
+
+    y0, x0 = coords.min(axis=0)
+    y1, x1 = coords.max(axis=0) + 1
+
+    cropped = img_arr[y0:y1, x0:x1]
+
+    # Pad to square
+    h, w = cropped.shape
+    diff = abs(h - w)
+    pad_1 = diff // 2
+    pad_2 = diff - pad_1
+
+    if h > w:
+        pad_width = ((0,0), (pad_1, pad_2))
+    else:
+        pad_width = ((pad_1, pad_2), (0,0))
+
+    square = np.pad(cropped, pad_width, mode='constant', constant_values=0)
+
+    # Resize to 20x20 and place in center of 28x28
+    img_square = Image.fromarray(square)
+    img_square = img_square.resize((20, 20), Image.Resampling.LANCZOS)
+
+    final_img = Image.new('L', (28, 28), 0)
+    final_img.paste(img_square, (4, 4))
+
+    return final_img
+
+class RetrainWorker(QThread):
+    finished = pyqtSignal(str) # Message
+    error = pyqtSignal(str)
+
+    def __init__(self, model, target_img_arr, target_label, user_data_dir):
+        super().__init__()
+        self.model = model
+        self.target_img_arr = target_img_arr
+        self.target_label = target_label
+        self.user_data_dir = user_data_dir
+
+    def run(self):
+        try:
+            images = []
+            labels = []
+            files = glob.glob(os.path.join(self.user_data_dir, "*.png"))
+
+            for f in files:
+                try:
+                    basename = os.path.basename(f)
+                    label = int(basename.split('_')[0])
+                    img = Image.open(f).convert('L')
+                    # Note: Saved images are already preprocessed (28x28)
+                    img_arr = np.array(img).astype('float32') / 255.0
+                    img_arr = np.expand_dims(img_arr, axis=-1)
+                    images.append(img_arr)
+                    labels.append(label)
+                except Exception:
+                    continue
+
+            if not images:
+                self.finished.emit("No data to train.")
+                return
+
+            X_train = np.array(images)
+            y_train = np.array(labels)
+
+            optimizer = keras.optimizers.Adam(learning_rate=0.005)
+            self.model.compile(loss='sparse_categorical_crossentropy',
+                               optimizer=optimizer,
+                               metrics=['accuracy'])
+
+            max_attempts = 50
+            learned = False
+            for i in range(max_attempts):
+                self.model.fit(X_train, y_train, epochs=1, verbose=0, batch_size=len(X_train))
+                if self.target_img_arr is not None:
+                    pred = self.model.predict(np.expand_dims(self.target_img_arr, axis=0), verbose=0)
+                    if np.argmax(pred) == self.target_label:
+                        self.finished.emit(f"Đã học xong sau {i+1} epochs.")
+                        learned = True
+                        break
+
+            if not learned:
+                self.finished.emit("Đã hoàn tất huấn luyện (Max epochs).")
+
+            self.model.save('model/handwriting_model.keras')
+
+        except Exception as e:
+            self.error.emit(str(e))
 
 class DrawCanvas(QWidget):
     def __init__(self, parent=None):
@@ -158,7 +270,6 @@ class DrawCanvas(QWidget):
             new_height = max(self.height(), self.image.height())
             new_image = QImage(new_width, new_height, QImage.Format.Format_RGB32)
             new_image.fill(Qt.GlobalColor.white)
-
             painter = QPainter(new_image)
             painter.drawImage(QPoint(0, 0), self.image)
             self.image = new_image
@@ -166,6 +277,23 @@ class DrawCanvas(QWidget):
 
     def clear_image(self):
         self.image.fill(Qt.GlobalColor.white)
+        self.update()
+
+    def set_image(self, img_pil):
+        # Convert PIL to QImage and draw
+        img_pil = img_pil.convert("RGB")
+        data = img_pil.tobytes("raw", "RGB")
+        qim = QImage(data, img_pil.width, img_pil.height, QImage.Format.Format_RGB888)
+
+        # Scale to fit canvas
+        scaled_qim = qim.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+        self.clear_image()
+        painter = QPainter(self.image)
+        # Center image
+        x = (self.width() - scaled_qim.width()) // 2
+        y = (self.height() - scaled_qim.height()) // 2
+        painter.drawImage(x, y, scaled_qim)
         self.update()
 
     def mousePressEvent(self, event):
@@ -190,26 +318,78 @@ class DrawCanvas(QWidget):
 
     def paintEvent(self, event):
         canvas_painter = QPainter(self)
-        # Draw the image centered or just top-left? Top-left is fine as we resize image to match widget
-        # Actually, we should draw the portion of the image that corresponds to the widget rect
         rect = event.rect()
         canvas_painter.drawImage(rect, self.image, rect)
 
     def get_image(self):
         return self.image
 
+class ConfidenceBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(220)
+        self.confidence = 0.0
+        self.label = "?"
+
+    def set_data(self, label, confidence):
+        self.label = label
+        self.confidence = confidence
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Dimensions
+        w = self.width()
+        h = self.height()
+        bar_width = 60
+        bar_max_h = 120
+        bar_x = (w - bar_width) // 2
+
+        bar_y_start = 40
+
+        # Draw Bar Border (White)
+        painter.setPen(QPen(QColor("white"), 3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(bar_x, bar_y_start, bar_width, bar_max_h)
+
+        # Draw Bar Fill
+        if self.confidence > 0:
+            fill_h = int(bar_max_h * self.confidence)
+            fill_y = bar_y_start + (bar_max_h - fill_h)
+
+            # Color based on confidence
+            color = QColor(COLORS["btn_orange"])
+            if self.confidence > 0.8:
+                color = QColor(COLORS["btn_green"])
+            elif self.confidence > 0.5:
+                color = QColor(COLORS["btn_blue"])
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            # Adjust rect to fit inside border
+            painter.drawRect(bar_x + 2, fill_y, bar_width - 3, fill_h - 2)
+
+        # Draw Percentage Text (Above bar)
+        painter.setPen(QColor(COLORS["text_main"]))
+        painter.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        painter.drawText(0, 0, w, 35, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, f"{self.confidence*100:.1f}%")
+
+        # Draw Label (Below bar)
+        painter.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+        painter.drawText(0, bar_y_start + bar_max_h + 10, w, 40, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter, self.label)
+
 class HandwritingApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI Studio Nhận Diện Chữ Viết")
-        self.setGeometry(100, 100, 1100, 750)
+        self.setWindowTitle("AI Handwriting Recognition Pro v2.0")
+        self.setGeometry(100, 100, 1000, 700)
         self.setStyleSheet(STYLESHEET)
 
         self.model = None
         self.label_map = None
         self.char_to_index = None
-        self.easyocr_reader = None
-        self.last_img_cnn = None
 
         self.load_model()
         self.init_ui()
@@ -220,7 +400,7 @@ class HandwritingApp(QMainWindow):
             label_path = 'model/label_map.json'
 
             if not os.path.exists(model_path) or not os.path.exists(label_path):
-                QMessageBox.critical(self, "Lỗi Hệ Thống", "Không tìm thấy file mô hình. Vui lòng chạy script huấn luyện trước.")
+                QMessageBox.critical(self, "Lỗi", "Không tìm thấy model.")
                 return
 
             self.model = keras.models.load_model(model_path)
@@ -228,272 +408,277 @@ class HandwritingApp(QMainWindow):
                 self.label_map = json.load(f)
             self.label_map = {int(k): v for k, v in self.label_map.items()}
             self.char_to_index = {v: k for k, v in self.label_map.items()}
-            print("Hệ thống: Đã tải mô hình.")
+            print("Model loaded.")
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi", f"Không thể tải mô hình: {e}")
-
-    def get_easyocr_reader(self):
-        if self.easyocr_reader is None:
-            self.easyocr_reader = easyocr.Reader(['en'], gpu=False)
-        return self.easyocr_reader
+            QMessageBox.critical(self, "Lỗi", f"Không thể tải model: {e}")
 
     def init_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(10)
 
-        # --- Header ---
-        header_layout = QHBoxLayout()
-        title_info = QVBoxLayout()
-        lbl_title = QLabel("AI Studio Nhận Diện Chữ Viết")
-        lbl_title.setObjectName("header")
-        lbl_subtitle = QLabel("Hệ thống Nhận diện & Tự học Nâng cao")
-        lbl_subtitle.setObjectName("subheader")
-        title_info.addWidget(lbl_title)
-        title_info.addWidget(lbl_subtitle)
-        header_layout.addLayout(title_info)
-        header_layout.addStretch()
+        # --- Top Navigation (Toggle) ---
+        nav_layout = QHBoxLayout()
+        nav_layout.addStretch()
 
-        # Status Badge (Static for now)
-        lbl_status = QLabel("● Hệ thống Sẵn sàng")
-        lbl_status.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold; background: {COLORS['bg']}; padding: 8px 15px; border-radius: 15px;")
-        header_layout.addWidget(lbl_status)
+        self.btn_mode_recognize = QPushButton("Nhận Diện")
+        self.btn_mode_recognize.setObjectName("toggle_btn")
+        self.btn_mode_recognize.setCheckable(True)
+        self.btn_mode_recognize.setChecked(True)
+        self.btn_mode_recognize.clicked.connect(lambda: self.switch_mode(0))
 
-        main_layout.addLayout(header_layout)
+        self.btn_mode_train = QPushButton("Huấn Luyện Mới")
+        self.btn_mode_train.setObjectName("toggle_btn")
+        self.btn_mode_train.setCheckable(True)
+        self.btn_mode_train.clicked.connect(lambda: self.switch_mode(1))
 
-        # --- Main Content Area (2 Columns) ---
-        content_layout = QHBoxLayout()
-
-        # Left Column: Workspace (Tabs for Draw/Upload)
-        left_card = QFrame()
-        left_card.setObjectName("card")
-        left_layout = QVBoxLayout(left_card)
-        left_layout.setContentsMargins(0, 10, 0, 0)
-
-        self.tabs = QTabWidget()
-        self.setup_draw_tab()
-        self.setup_upload_tab()
-        self.tabs.addTab(self.draw_tab, "Vẽ Tay")
-        self.tabs.addTab(self.upload_tab, "Tải Ảnh")
-
-        left_layout.addWidget(self.tabs)
-        content_layout.addWidget(left_card, stretch=2)
-
-        # Right Column: Controls & Results
-        right_card = QFrame()
-        right_card.setObjectName("card")
-        right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(25, 25, 25, 25)
-        right_layout.setSpacing(20)
-
-        # 1. Configuration Section
-        lbl_config = QLabel("Cấu hình")
-        lbl_config.setStyleSheet(f"font-weight: bold; color: {COLORS['text_primary']}; font-size: 16px;")
-        right_layout.addWidget(lbl_config)
-
-        # Engine Select
-        self.combo_engine = QComboBox()
-        self.combo_engine.addItems(["Custom AI (CNN)", "Tesseract OCR", "EasyOCR"])
-        right_layout.addWidget(QLabel("Bộ Nhận Diện:"))
-        right_layout.addWidget(self.combo_engine)
-
-        # Filter Mode
-        right_layout.addWidget(QLabel("Chế độ Lọc:"))
-        mode_layout = QHBoxLayout()
         self.mode_group = QButtonGroup(self)
+        self.mode_group.addButton(self.btn_mode_recognize)
+        self.mode_group.addButton(self.btn_mode_train)
+        self.mode_group.setExclusive(True)
 
+        nav_layout.addWidget(self.btn_mode_recognize)
+        nav_layout.addWidget(self.btn_mode_train)
+        nav_layout.addStretch()
+
+        main_layout.addLayout(nav_layout)
+
+        # --- Main Content Stack ---
+        self.stack = QStackedWidget()
+
+        # Page 1: Recognition
+        self.page_recognize = QWidget()
+        self.setup_recognition_ui()
+        self.stack.addWidget(self.page_recognize)
+
+        # Page 2: Training
+        self.page_train = QWidget()
+        self.setup_training_ui()
+        self.stack.addWidget(self.page_train)
+
+        main_layout.addWidget(self.stack)
+
+    def switch_mode(self, index):
+        self.stack.setCurrentIndex(index)
+
+    # ==========================================
+    # RECOGNITION UI
+    # ==========================================
+    def setup_recognition_ui(self):
+        layout = QVBoxLayout(self.page_recognize)
+        layout.setContentsMargins(0, 20, 0, 0)
+
+        # Header
+        lbl_title = QLabel("AI Nhận Diện Chữ Viết Tay")
+        lbl_title.setObjectName("header_title")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_title)
+
+        # Body
+        body_layout = QHBoxLayout()
+        body_layout.setSpacing(30)
+
+        # Left: Canvas
+        self.canvas_recog = DrawCanvas()
+        # Wrap canvas in a frame to give it rounded corners visual if needed,
+        # but DrawCanvas paints white. Let's just add it.
+        # To make it look like the screenshot (rounded white box), we can put it in a container.
+        canvas_container = QFrame()
+        canvas_container.setStyleSheet("background-color: white; border-radius: 20px;")
+        canvas_layout = QVBoxLayout(canvas_container)
+        canvas_layout.setContentsMargins(10, 10, 10, 10)
+        canvas_layout.addWidget(self.canvas_recog)
+
+        body_layout.addWidget(canvas_container, stretch=3)
+
+        # Right: Controls
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(30, 30, 30, 30)
+        controls_layout.setSpacing(20)
+
+        # Filter
+        filter_layout = QHBoxLayout()
         self.rb_all = QRadioButton("Tất cả")
         self.rb_all.setChecked(True)
-        self.mode_group.addButton(self.rb_all)
-        mode_layout.addWidget(self.rb_all)
+        self.rb_num = QRadioButton("Số (0-9)")
+        self.rb_char = QRadioButton("Chữ cái (a-z)")
 
-        self.rb_num = QRadioButton("Số")
-        self.mode_group.addButton(self.rb_num)
-        mode_layout.addWidget(self.rb_num)
+        self.filter_group = QButtonGroup(self)
+        self.filter_group.addButton(self.rb_all)
+        self.filter_group.addButton(self.rb_num)
+        self.filter_group.addButton(self.rb_char)
 
-        self.rb_char = QRadioButton("Chữ")
-        self.mode_group.addButton(self.rb_char)
-        mode_layout.addWidget(self.rb_char)
+        filter_layout.addWidget(self.rb_all)
+        filter_layout.addWidget(self.rb_num)
+        filter_layout.addWidget(self.rb_char)
+        controls_layout.addLayout(filter_layout)
 
-        right_layout.addLayout(mode_layout)
-
-        # Separator
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet(f"color: {COLORS['border']};")
-        right_layout.addWidget(line)
-
-        # 2. Action Section
-        lbl_actions = QLabel("Thao tác")
-        lbl_actions.setStyleSheet(f"font-weight: bold; color: {COLORS['text_primary']}; font-size: 16px;")
-        right_layout.addWidget(lbl_actions)
-
-        btn_predict = QPushButton("Chạy Dự Đoán")
-        btn_predict.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_predict.clicked.connect(self.trigger_prediction)
-        right_layout.addWidget(btn_predict)
-
-        # 3. Result Section
-        right_layout.addStretch()
-        lbl_result_title = QLabel("Kết quả Phân tích")
-        lbl_result_title.setStyleSheet(f"font-weight: bold; color: {COLORS['text_primary']}; font-size: 16px;")
-        right_layout.addWidget(lbl_result_title)
-
-        self.lbl_result = QLabel("Đang chờ đầu vào...")
+        # Result Box
+        self.lbl_result = QLabel("KẾT QUẢ NHẬN DIỆN:\n\nCHỮ: ...")
         self.lbl_result.setObjectName("result_box")
-        self.lbl_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_result.setWordWrap(True)
-        right_layout.addWidget(self.lbl_result)
+        self.lbl_result.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.lbl_result.setFixedHeight(150)
+        controls_layout.addWidget(self.lbl_result)
 
-        # Retrain Button (Hidden)
-        self.btn_retrain = QPushButton("Sửa lỗi & Dạy lại AI")
-        self.btn_retrain.setObjectName("danger")
-        self.btn_retrain.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_retrain.clicked.connect(self.retrain_model_dialog)
-        self.btn_retrain.setVisible(False)
-        right_layout.addWidget(self.btn_retrain)
+        # Confidence Chart
+        self.chart = ConfidenceBar()
+        controls_layout.addWidget(self.chart)
 
-        content_layout.addWidget(right_card, stretch=1)
-        main_layout.addLayout(content_layout)
+        controls_layout.addStretch()
 
-    def setup_draw_tab(self):
-        self.draw_tab = QWidget()
-        layout = QVBoxLayout(self.draw_tab)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Buttons
+        btn_layout = QHBoxLayout()
 
-        # Canvas Wrapper for border
-        canvas_wrapper = QWidget()
-        canvas_wrapper.setObjectName("canvas_wrapper")
-        wrapper_layout = QVBoxLayout(canvas_wrapper)
-        wrapper_layout.setContentsMargins(10, 10, 10, 10)
-
-        self.canvas = DrawCanvas()
-        wrapper_layout.addWidget(self.canvas)
-        layout.addWidget(canvas_wrapper)
-
-        # Canvas Controls
-        controls = QHBoxLayout()
-        btn_clear = QPushButton("Xóa bảng")
-        btn_clear.setObjectName("secondary")
-        btn_clear.clicked.connect(self.canvas.clear_image)
+        btn_upload = QPushButton("Tải ảnh")
+        btn_upload.setObjectName("btn_blue")
+        btn_upload.clicked.connect(self.load_image_recog)
 
         btn_save = QPushButton("Lưu ảnh")
-        btn_save.setObjectName("secondary")
-        btn_save.clicked.connect(self.save_drawing)
+        btn_save.setObjectName("btn_blue")
+        btn_save.clicked.connect(self.save_drawing_recog)
 
-        controls.addStretch()
-        controls.addWidget(btn_clear)
-        controls.addWidget(btn_save)
-        controls.addStretch()
+        btn_predict = QPushButton("Nhận Diện")
+        btn_predict.setObjectName("btn_green")
+        btn_predict.clicked.connect(self.predict)
 
-        layout.addLayout(controls)
+        btn_clear = QPushButton("Xóa hết")
+        btn_clear.setObjectName("btn_orange")
+        btn_clear.clicked.connect(self.clear_recog)
 
-    def setup_upload_tab(self):
-        self.upload_tab = QWidget()
-        layout = QVBoxLayout(self.upload_tab)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(20)
+        btn_layout.addWidget(btn_upload)
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_predict)
+        btn_layout.addWidget(btn_clear)
 
-        self.image_display = QLabel("Chưa chọn ảnh")
-        self.image_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_display.setFixedSize(400, 400)
-        self.image_display.setStyleSheet(f"border: 2px dashed {COLORS['border']}; border-radius: 15px; color: {COLORS['text_secondary']};")
+        controls_layout.addLayout(btn_layout)
 
-        btn_upload = QPushButton("Chọn Ảnh")
-        btn_upload.setObjectName("secondary")
-        btn_upload.setFixedWidth(200)
-        btn_upload.clicked.connect(self.load_image_file)
+        body_layout.addWidget(controls_card, stretch=2)
+        layout.addLayout(body_layout)
 
-        layout.addWidget(self.image_display)
-        layout.addWidget(btn_upload)
+    # ==========================================
+    # TRAINING UI
+    # ==========================================
+    def setup_training_ui(self):
+        layout = QVBoxLayout(self.page_train)
+        layout.setContentsMargins(0, 20, 0, 0)
 
-    def trigger_prediction(self):
-        # Determine current tab
-        current_idx = self.tabs.currentIndex()
-        img = None
+        # Header
+        lbl_title = QLabel("Tạo Dữ Liệu Huấn Luyện")
+        lbl_title.setObjectName("header_title")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_title)
 
-        if current_idx == 0: # Draw Tab
-            qimage = self.canvas.get_image()
-            qimage = qimage.convertToFormat(QImage.Format.Format_RGBA8888)
-            width = qimage.width()
-            height = qimage.height()
-            ptr = qimage.bits()
-            ptr.setsize(height * width * 4)
-            arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
-            img = Image.fromarray(arr).convert('L')
-        else: # Upload Tab
-            if not hasattr(self, 'uploaded_image') or self.uploaded_image is None:
-                QMessageBox.warning(self, "Cảnh báo", "Vui lòng tải ảnh lên trước.")
-                return
-            img = self.uploaded_image
+        # Body
+        body_layout = QHBoxLayout()
+        body_layout.setSpacing(30)
 
-        self.process_prediction(img)
+        # Left: Canvas
+        self.canvas_train = DrawCanvas()
+        canvas_container = QFrame()
+        canvas_container.setStyleSheet("background-color: white; border-radius: 20px;")
+        canvas_layout = QVBoxLayout(canvas_container)
+        canvas_layout.setContentsMargins(10, 10, 10, 10)
+        canvas_layout.addWidget(self.canvas_train)
 
-    def load_image_file(self):
+        body_layout.addWidget(canvas_container, stretch=3)
+
+        # Right: Controls
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(30, 30, 30, 30)
+        controls_layout.setSpacing(20)
+
+        # Label Input
+        controls_layout.addWidget(QLabel("Nhãn (ví dụ: 5, A, B)"))
+        self.txt_train_label = QLineEdit()
+        self.txt_train_label.setPlaceholderText("Nhập nhãn...")
+        self.txt_train_label.returnPressed.connect(self.save_and_train)
+        controls_layout.addWidget(self.txt_train_label)
+
+        controls_layout.addStretch()
+
+        # Buttons
+        btn_save = QPushButton("💾 Lưu ảnh")
+        btn_save.setObjectName("btn_green")
+        btn_save.clicked.connect(self.save_and_train)
+        controls_layout.addWidget(btn_save)
+
+        btn_folder = QPushButton("📂 Mở thư mục")
+        btn_folder.setObjectName("btn_blue")
+        btn_folder.clicked.connect(self.open_user_data_folder)
+        controls_layout.addWidget(btn_folder)
+
+        btn_clear = QPushButton("🗑️ Xóa tạm")
+        btn_clear.setObjectName("btn_orange")
+        btn_clear.clicked.connect(self.canvas_train.clear_image)
+        controls_layout.addWidget(btn_clear)
+
+        # Status
+        self.lbl_train_status = QLabel("Sẵn sàng vẽ...")
+        self.lbl_train_status.setStyleSheet("color: #AAA; font-style: italic;")
+        self.lbl_train_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controls_layout.addWidget(self.lbl_train_status)
+
+        controls_layout.addStretch()
+
+        body_layout.addWidget(controls_card, stretch=2)
+        layout.addLayout(body_layout)
+
+    # ==========================================
+    # LOGIC
+    # ==========================================
+    def clear_recog(self):
+        self.canvas_recog.clear_image()
+        self.lbl_result.setText("KẾT QUẢ NHẬN DIỆN:\n\nCHỮ: ...")
+        self.chart.set_data("?", 0.0)
+
+    def load_image_recog(self):
         file_name, _ = QFileDialog.getOpenFileName(self, "Chọn Ảnh", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
         if file_name:
             try:
-                pixmap = QPixmap(file_name)
-                scaled_pixmap = pixmap.scaled(400, 400, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                self.image_display.setPixmap(scaled_pixmap)
-                self.image_display.setText("")
-
-                self.uploaded_image = Image.open(file_name).convert('L')
-                # Auto predict? No, let user click button for consistency in this UI
+                img = Image.open(file_name).convert('L')
+                self.canvas_recog.set_image(img)
             except Exception as e:
                 QMessageBox.critical(self, "Lỗi", f"Không thể tải ảnh: {e}")
 
-    def save_drawing(self):
+    def save_drawing_recog(self):
         file_name, _ = QFileDialog.getSaveFileName(self, "Lưu Ảnh", "", "PNG Files (*.png);;JPEG Files (*.jpg)")
         if file_name:
             if not file_name.endswith(('.png', '.jpg', '.jpeg')):
                 file_name += '.png'
-            self.canvas.get_image().save(file_name)
+            self.canvas_recog.get_image().save(file_name)
             QMessageBox.information(self, "Đã lưu", f"Ảnh đã được lưu tại:\n{file_name}")
 
-    def process_prediction(self, img_pil):
-        # Prepare images
-        img_tess = img_pil.copy() # Black text on white
-
-        # For CNN: Invert if needed
-        np_img = np.array(img_pil)
-        if np.mean(np_img) > 127:
-            img_cnn = ImageOps.invert(img_pil)
-        else:
-            img_cnn = img_pil.copy()
-        img_cnn = img_cnn.resize((28, 28))
-
-        self.last_img_cnn = img_cnn # Save for retraining
-
-        # Get selected engine
-        engine = self.combo_engine.currentText()
-
-        result_text = ""
-        self.btn_retrain.setVisible(False)
-
-        if engine == "Custom AI (CNN)":
-            result_text = self.predict_cnn(img_cnn)
-            self.btn_retrain.setVisible(True)
-        elif engine == "Tesseract OCR":
-            result_text = self.predict_tesseract(img_tess)
-        elif engine == "EasyOCR":
-            result_text = self.predict_easyocr(img_tess)
-
-        self.lbl_result.setText(result_text)
-
-    def predict_cnn(self, img_cnn_pil):
+    def predict(self):
         if self.model is None:
-            return "Chưa tải mô hình"
+            return
 
-        img_arr = np.array(img_cnn_pil)
-        img_arr = img_arr.astype('float32') / 255.0
+        # Get image from canvas
+        qimage = self.canvas_recog.get_image()
+        qimage = qimage.convertToFormat(QImage.Format.Format_RGBA8888)
+        width = qimage.width()
+        height = qimage.height()
+        ptr = qimage.bits()
+        ptr.setsize(height * width * 4)
+        arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
+        img_pil = Image.fromarray(arr).convert('L')
+
+        # Preprocess
+        img_cnn = preprocess_image(img_pil)
+
+        img_arr = np.array(img_cnn).astype('float32') / 255.0
         img_arr = np.expand_dims(img_arr, axis=-1)
         img_arr = np.expand_dims(img_arr, axis=0)
 
+        # Predict
         prediction = self.model.predict(img_arr)[0]
 
+        # Filter
         valid_indices = []
         if self.rb_num.isChecked():
             valid_indices = list(range(10))
@@ -510,115 +695,92 @@ class HandwritingApp(QMainWindow):
         predicted_class = np.argmax(masked_prediction)
         confidence = masked_prediction[predicted_class]
 
-        cnn_result = self.label_map.get(predicted_class, "?")
-        return f"{cnn_result}\n\nĐộ tin cậy: {confidence*100:.1f}%"
+        result_char = self.label_map.get(predicted_class, "?")
 
-    def predict_tesseract(self, img_pil):
-        tess_config = '--psm 10'
-        if self.rb_num.isChecked():
-            tess_config += ' -c tessedit_char_whitelist=0123456789'
-        elif self.rb_char.isChecked():
-            tess_config += ' -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+        # Update UI
+        self.lbl_result.setText(f"KẾT QUẢ NHẬN DIỆN:\n\nCHỮ: {result_char}")
+        self.chart.set_data(result_char, confidence)
 
-        try:
-            tess_result = pytesseract.image_to_string(img_pil, config=tess_config).strip()
-            if not tess_result:
-                tess_result = "(Không có kết quả)"
-            return tess_result
-        except Exception:
-            return "Lỗi: Không tìm thấy Tesseract"
+    def save_and_train(self):
+        label_text = self.txt_train_label.text().strip()
+        print(f"DEBUG: Label text read: '{label_text}'")
 
-    def predict_easyocr(self, img_pil):
-        try:
-            reader = self.get_easyocr_reader()
-            allowlist = None
-            if self.rb_num.isChecked():
-                allowlist = '0123456789'
-            elif self.rb_char.isChecked():
-                allowlist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-
-            img_np = np.array(img_pil)
-            results = reader.readtext(img_np, detail=0, allowlist=allowlist)
-
-            if results:
-                return results[0]
-            else:
-                return "(Không có kết quả)"
-        except Exception as e:
-            return f"Lỗi: {e}"
-
-    def retrain_model_dialog(self):
-        if self.last_img_cnn is None:
+        if not label_text:
+            QMessageBox.warning(self, "Lỗi", "Vui lòng nhập nhãn (ví dụ: A, 5).")
             return
 
-        text, ok = QInputDialog.getText(self, "Dạy AI", "Nhập ký tự đúng (0-9, A-Z, a-z):")
-        if ok and text:
-            correct_char = text.strip()
-            if len(correct_char) != 1:
-                QMessageBox.warning(self, "Lỗi", "Vui lòng chỉ nhập đúng 1 ký tự.")
+        if len(label_text) != 1:
+            QMessageBox.warning(self, "Lỗi", "Chỉ nhập đúng 1 ký tự.")
+            return
+
+        # Check if label is valid
+        if label_text not in self.char_to_index:
+            if label_text.swapcase() in self.char_to_index:
+                label_text = label_text.swapcase()
+            else:
+                QMessageBox.warning(self, "Lỗi", f"Ký tự '{label_text}' không được hỗ trợ.")
                 return
 
-            if correct_char not in self.char_to_index:
-                if correct_char.swapcase() in self.char_to_index:
-                     correct_char = correct_char.swapcase()
-                else:
-                    QMessageBox.warning(self, "Lỗi", f"Ký tự '{correct_char}' chưa được hỗ trợ.")
-                    return
+        label_idx = self.char_to_index[label_text]
 
-            label_idx = self.char_to_index[correct_char]
+        # Get image
+        qimage = self.canvas_train.get_image()
+        qimage = qimage.convertToFormat(QImage.Format.Format_RGBA8888)
+        width = qimage.width()
+        height = qimage.height()
+        ptr = qimage.bits()
+        ptr.setsize(height * width * 4)
+        arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
+        img_pil = Image.fromarray(arr).convert('L')
 
-            timestamp = int(time.time())
-            filename = f"user_data/{label_idx}_{timestamp}.png"
-            self.last_img_cnn.save(filename)
+        # Preprocess properly
+        img_cnn = preprocess_image(img_pil)
 
-            img_arr = np.array(self.last_img_cnn).astype('float32') / 255.0
-            img_arr = np.expand_dims(img_arr, axis=-1)
+        timestamp = int(time.time())
+        filename = f"user_data/{label_idx}_{timestamp}.png"
+        img_cnn.save(filename)
 
-            self.perform_retraining(target_img_arr=img_arr, target_label=label_idx)
+        self.lbl_train_status.setText("Đang huấn luyện (Vui lòng đợi)...")
 
-            QMessageBox.information(self, "Thành công", f"AI đã học ký tự '{correct_char}' thành công!")
+        # Prepare for worker
+        img_arr = np.array(img_cnn).astype('float32') / 255.0
+        img_arr = np.expand_dims(img_arr, axis=-1)
 
-    def perform_retraining(self, target_img_arr=None, target_label=None):
-        images = []
-        labels = []
-        files = glob.glob("user_data/*.png")
+        # Disable buttons
+        self.btn_mode_recognize.setEnabled(False)
+        self.btn_mode_train.setEnabled(False)
 
-        for f in files:
-            try:
-                basename = os.path.basename(f)
-                label = int(basename.split('_')[0])
-                img = Image.open(f).convert('L')
-                img = img.resize((28, 28))
-                img_arr = np.array(img).astype('float32') / 255.0
-                img_arr = np.expand_dims(img_arr, axis=-1)
-                images.append(img_arr)
-                labels.append(label)
-            except Exception:
-                continue
+        # Start Worker
+        self.worker = RetrainWorker(self.model, img_arr, label_idx, "user_data")
+        self.worker.finished.connect(self.on_retrain_finished)
+        self.worker.error.connect(self.on_retrain_error)
+        self.worker.start()
 
-        if not images:
-            return
+    def on_retrain_finished(self, message):
+        self.lbl_train_status.setText(message)
+        self.canvas_train.clear_image()
+        self.txt_train_label.clear()
+        self.btn_mode_recognize.setEnabled(True)
+        self.btn_mode_train.setEnabled(True)
+        QTimer.singleShot(3000, lambda: self.lbl_train_status.setText("Sẵn sàng vẽ..."))
 
-        X_train = np.array(images)
-        y_train = np.array(labels)
+    def on_retrain_error(self, error_msg):
+        QMessageBox.critical(self, "Lỗi Huấn Luyện", error_msg)
+        self.lbl_train_status.setText("Lỗi khi huấn luyện.")
+        self.btn_mode_recognize.setEnabled(True)
+        self.btn_mode_train.setEnabled(True)
 
-        print(f"Retraining on {len(X_train)} samples...")
-        optimizer = keras.optimizers.Adam(learning_rate=0.005)
-        self.model.compile(loss='sparse_categorical_crossentropy',
-                           optimizer=optimizer,
-                           metrics=['accuracy'])
+    def open_user_data_folder(self):
+        path = os.path.abspath("user_data")
+        if not os.path.exists(path):
+            os.makedirs(path)
 
-        max_attempts = 50
-        for i in range(max_attempts):
-            self.model.fit(X_train, y_train, epochs=1, verbose=0, batch_size=len(X_train))
-            if target_img_arr is not None and target_label is not None:
-                pred = self.model.predict(np.expand_dims(target_img_arr, axis=0), verbose=0)
-                if np.argmax(pred) == target_label:
-                    print(f"Learned in {i+1} epochs.")
-                    break
-
-        self.model.save('model/handwriting_model.keras')
-        print("Model updated.")
+        if platform.system() == "Windows":
+            os.startfile(path)
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
