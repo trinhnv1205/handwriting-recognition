@@ -201,7 +201,7 @@ class DrawCanvas(QWidget):
 class HandwritingApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Handwriting AI Studio")
+        self.setWindowTitle("AI Studio Nhận Diện Chữ Viết")
         self.setGeometry(100, 100, 1100, 750)
         self.setStyleSheet(STYLESHEET)
 
@@ -220,7 +220,7 @@ class HandwritingApp(QMainWindow):
             label_path = 'model/label_map.json'
 
             if not os.path.exists(model_path) or not os.path.exists(label_path):
-                QMessageBox.critical(self, "System Error", "Model files not found. Please run training script.")
+                QMessageBox.critical(self, "Lỗi Hệ Thống", "Không tìm thấy file mô hình. Vui lòng chạy script huấn luyện trước.")
                 return
 
             self.model = keras.models.load_model(model_path)
@@ -228,9 +228,9 @@ class HandwritingApp(QMainWindow):
                 self.label_map = json.load(f)
             self.label_map = {int(k): v for k, v in self.label_map.items()}
             self.char_to_index = {v: k for k, v in self.label_map.items()}
-            print("System: Model loaded.")
+            print("Hệ thống: Đã tải mô hình.")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load model: {e}")
+            QMessageBox.critical(self, "Lỗi", f"Không thể tải mô hình: {e}")
 
     def get_easyocr_reader(self):
         if self.easyocr_reader is None:
@@ -247,9 +247,9 @@ class HandwritingApp(QMainWindow):
         # --- Header ---
         header_layout = QHBoxLayout()
         title_info = QVBoxLayout()
-        lbl_title = QLabel("Handwriting AI Studio")
+        lbl_title = QLabel("AI Studio Nhận Diện Chữ Viết")
         lbl_title.setObjectName("header")
-        lbl_subtitle = QLabel("Advanced Recognition & Active Learning System")
+        lbl_subtitle = QLabel("Hệ thống Nhận diện & Tự học Nâng cao")
         lbl_subtitle.setObjectName("subheader")
         title_info.addWidget(lbl_title)
         title_info.addWidget(lbl_subtitle)
@@ -257,7 +257,7 @@ class HandwritingApp(QMainWindow):
         header_layout.addStretch()
 
         # Status Badge (Static for now)
-        lbl_status = QLabel("● System Ready")
+        lbl_status = QLabel("● Hệ thống Sẵn sàng")
         lbl_status.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold; background: {COLORS['bg']}; padding: 8px 15px; border-radius: 15px;")
         header_layout.addWidget(lbl_status)
 
@@ -275,8 +275,8 @@ class HandwritingApp(QMainWindow):
         self.tabs = QTabWidget()
         self.setup_draw_tab()
         self.setup_upload_tab()
-        self.tabs.addTab(self.draw_tab, "Draw Canvas")
-        self.tabs.addTab(self.upload_tab, "Upload Image")
+        self.tabs.addTab(self.draw_tab, "Vẽ Tay")
+        self.tabs.addTab(self.upload_tab, "Tải Ảnh")
 
         left_layout.addWidget(self.tabs)
         content_layout.addWidget(left_card, stretch=2)
@@ -289,31 +289,31 @@ class HandwritingApp(QMainWindow):
         right_layout.setSpacing(20)
 
         # 1. Configuration Section
-        lbl_config = QLabel("Configuration")
+        lbl_config = QLabel("Cấu hình")
         lbl_config.setStyleSheet(f"font-weight: bold; color: {COLORS['text_primary']}; font-size: 16px;")
         right_layout.addWidget(lbl_config)
 
         # Engine Select
         self.combo_engine = QComboBox()
         self.combo_engine.addItems(["Custom AI (CNN)", "Tesseract OCR", "EasyOCR"])
-        right_layout.addWidget(QLabel("Recognition Engine:"))
+        right_layout.addWidget(QLabel("Bộ Nhận Diện:"))
         right_layout.addWidget(self.combo_engine)
 
         # Filter Mode
-        right_layout.addWidget(QLabel("Filter Mode:"))
+        right_layout.addWidget(QLabel("Chế độ Lọc:"))
         mode_layout = QHBoxLayout()
         self.mode_group = QButtonGroup(self)
 
-        self.rb_all = QRadioButton("All")
+        self.rb_all = QRadioButton("Tất cả")
         self.rb_all.setChecked(True)
         self.mode_group.addButton(self.rb_all)
         mode_layout.addWidget(self.rb_all)
 
-        self.rb_num = QRadioButton("Numbers")
+        self.rb_num = QRadioButton("Số")
         self.mode_group.addButton(self.rb_num)
         mode_layout.addWidget(self.rb_num)
 
-        self.rb_char = QRadioButton("Letters")
+        self.rb_char = QRadioButton("Chữ")
         self.mode_group.addButton(self.rb_char)
         mode_layout.addWidget(self.rb_char)
 
@@ -326,29 +326,29 @@ class HandwritingApp(QMainWindow):
         right_layout.addWidget(line)
 
         # 2. Action Section
-        lbl_actions = QLabel("Actions")
+        lbl_actions = QLabel("Thao tác")
         lbl_actions.setStyleSheet(f"font-weight: bold; color: {COLORS['text_primary']}; font-size: 16px;")
         right_layout.addWidget(lbl_actions)
 
-        btn_predict = QPushButton("Run Prediction")
+        btn_predict = QPushButton("Chạy Dự Đoán")
         btn_predict.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_predict.clicked.connect(self.trigger_prediction)
         right_layout.addWidget(btn_predict)
 
         # 3. Result Section
         right_layout.addStretch()
-        lbl_result_title = QLabel("Analysis Result")
+        lbl_result_title = QLabel("Kết quả Phân tích")
         lbl_result_title.setStyleSheet(f"font-weight: bold; color: {COLORS['text_primary']}; font-size: 16px;")
         right_layout.addWidget(lbl_result_title)
 
-        self.lbl_result = QLabel("Waiting for input...")
+        self.lbl_result = QLabel("Đang chờ đầu vào...")
         self.lbl_result.setObjectName("result_box")
         self.lbl_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_result.setWordWrap(True)
         right_layout.addWidget(self.lbl_result)
 
         # Retrain Button (Hidden)
-        self.btn_retrain = QPushButton("Fix & Retrain AI")
+        self.btn_retrain = QPushButton("Sửa lỗi & Dạy lại AI")
         self.btn_retrain.setObjectName("danger")
         self.btn_retrain.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_retrain.clicked.connect(self.retrain_model_dialog)
@@ -375,11 +375,11 @@ class HandwritingApp(QMainWindow):
 
         # Canvas Controls
         controls = QHBoxLayout()
-        btn_clear = QPushButton("Clear Canvas")
+        btn_clear = QPushButton("Xóa bảng")
         btn_clear.setObjectName("secondary")
         btn_clear.clicked.connect(self.canvas.clear_image)
 
-        btn_save = QPushButton("Save Image")
+        btn_save = QPushButton("Lưu ảnh")
         btn_save.setObjectName("secondary")
         btn_save.clicked.connect(self.save_drawing)
 
@@ -396,12 +396,12 @@ class HandwritingApp(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(20)
 
-        self.image_display = QLabel("No Image Selected")
+        self.image_display = QLabel("Chưa chọn ảnh")
         self.image_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_display.setFixedSize(400, 400)
         self.image_display.setStyleSheet(f"border: 2px dashed {COLORS['border']}; border-radius: 15px; color: {COLORS['text_secondary']};")
 
-        btn_upload = QPushButton("Select Image")
+        btn_upload = QPushButton("Chọn Ảnh")
         btn_upload.setObjectName("secondary")
         btn_upload.setFixedWidth(200)
         btn_upload.clicked.connect(self.load_image_file)
@@ -425,14 +425,14 @@ class HandwritingApp(QMainWindow):
             img = Image.fromarray(arr).convert('L')
         else: # Upload Tab
             if not hasattr(self, 'uploaded_image') or self.uploaded_image is None:
-                QMessageBox.warning(self, "Warning", "Please upload an image first.")
+                QMessageBox.warning(self, "Cảnh báo", "Vui lòng tải ảnh lên trước.")
                 return
             img = self.uploaded_image
 
         self.process_prediction(img)
 
     def load_image_file(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+        file_name, _ = QFileDialog.getOpenFileName(self, "Chọn Ảnh", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
         if file_name:
             try:
                 pixmap = QPixmap(file_name)
@@ -443,15 +443,15 @@ class HandwritingApp(QMainWindow):
                 self.uploaded_image = Image.open(file_name).convert('L')
                 # Auto predict? No, let user click button for consistency in this UI
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not load image: {e}")
+                QMessageBox.critical(self, "Lỗi", f"Không thể tải ảnh: {e}")
 
     def save_drawing(self):
-        file_name, _ = QFileDialog.getSaveFileName(self, "Save Drawing", "", "PNG Files (*.png);;JPEG Files (*.jpg)")
+        file_name, _ = QFileDialog.getSaveFileName(self, "Lưu Ảnh", "", "PNG Files (*.png);;JPEG Files (*.jpg)")
         if file_name:
             if not file_name.endswith(('.png', '.jpg', '.jpeg')):
                 file_name += '.png'
             self.canvas.get_image().save(file_name)
-            QMessageBox.information(self, "Saved", f"Image saved to:\n{file_name}")
+            QMessageBox.information(self, "Đã lưu", f"Ảnh đã được lưu tại:\n{file_name}")
 
     def process_prediction(self, img_pil):
         # Prepare images
@@ -485,7 +485,7 @@ class HandwritingApp(QMainWindow):
 
     def predict_cnn(self, img_cnn_pil):
         if self.model is None:
-            return "Model not loaded"
+            return "Chưa tải mô hình"
 
         img_arr = np.array(img_cnn_pil)
         img_arr = img_arr.astype('float32') / 255.0
@@ -511,7 +511,7 @@ class HandwritingApp(QMainWindow):
         confidence = masked_prediction[predicted_class]
 
         cnn_result = self.label_map.get(predicted_class, "?")
-        return f"{cnn_result}\n\nConfidence: {confidence*100:.1f}%"
+        return f"{cnn_result}\n\nĐộ tin cậy: {confidence*100:.1f}%"
 
     def predict_tesseract(self, img_pil):
         tess_config = '--psm 10'
@@ -523,10 +523,10 @@ class HandwritingApp(QMainWindow):
         try:
             tess_result = pytesseract.image_to_string(img_pil, config=tess_config).strip()
             if not tess_result:
-                tess_result = "(No result)"
+                tess_result = "(Không có kết quả)"
             return tess_result
         except Exception:
-            return "Error: Tesseract not found"
+            return "Lỗi: Không tìm thấy Tesseract"
 
     def predict_easyocr(self, img_pil):
         try:
@@ -543,26 +543,26 @@ class HandwritingApp(QMainWindow):
             if results:
                 return results[0]
             else:
-                return "(No result)"
+                return "(Không có kết quả)"
         except Exception as e:
-            return f"Error: {e}"
+            return f"Lỗi: {e}"
 
     def retrain_model_dialog(self):
         if self.last_img_cnn is None:
             return
 
-        text, ok = QInputDialog.getText(self, "Teach AI", "Enter correct character (0-9, A-Z, a-z):")
+        text, ok = QInputDialog.getText(self, "Dạy AI", "Nhập ký tự đúng (0-9, A-Z, a-z):")
         if ok and text:
             correct_char = text.strip()
             if len(correct_char) != 1:
-                QMessageBox.warning(self, "Error", "Please enter exactly 1 character.")
+                QMessageBox.warning(self, "Lỗi", "Vui lòng chỉ nhập đúng 1 ký tự.")
                 return
 
             if correct_char not in self.char_to_index:
                 if correct_char.swapcase() in self.char_to_index:
                      correct_char = correct_char.swapcase()
                 else:
-                    QMessageBox.warning(self, "Error", f"Character '{correct_char}' not supported.")
+                    QMessageBox.warning(self, "Lỗi", f"Ký tự '{correct_char}' chưa được hỗ trợ.")
                     return
 
             label_idx = self.char_to_index[correct_char]
@@ -576,7 +576,7 @@ class HandwritingApp(QMainWindow):
 
             self.perform_retraining(target_img_arr=img_arr, target_label=label_idx)
 
-            QMessageBox.information(self, "Success", f"AI learned '{correct_char}' successfully!")
+            QMessageBox.information(self, "Thành công", f"AI đã học ký tự '{correct_char}' thành công!")
 
     def perform_retraining(self, target_img_arr=None, target_label=None):
         images = []
