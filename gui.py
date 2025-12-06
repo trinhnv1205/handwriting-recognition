@@ -9,13 +9,18 @@ import pytesseract
 import time
 import glob
 import easyocr
+import matplotlib
+matplotlib.use('qtagg')
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QTabWidget,
                              QFileDialog, QMessageBox, QFrame, QRadioButton, QButtonGroup,
                              QInputDialog, QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect)
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont, QIcon, QCursor
-from PyQt6.QtCore import Qt, QPoint, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QPoint, QSize, QPropertyAnimation, QEasingCurve, QTimer
 
 # --- Professional Color Palette (Dracula-inspired but cleaner) ---
 COLORS = {
@@ -132,6 +137,13 @@ STYLESHEET = f"""
         color: {COLORS["text_primary"]};
     }}
 
+    /* Notification */
+    QLabel#notification {{
+        padding: 10px 15px;
+        border-radius: 8px;
+        font-weight: bold;
+    }}
+
     /* Canvas */
     QWidget#canvas_wrapper {{
         border: 2px dashed {COLORS["border"]};
@@ -190,19 +202,56 @@ class DrawCanvas(QWidget):
 
     def paintEvent(self, event):
         canvas_painter = QPainter(self)
-        # Draw the image centered or just top-left? Top-left is fine as we resize image to match widget
-        # Actually, we should draw the portion of the image that corresponds to the widget rect
         rect = event.rect()
         canvas_painter.drawImage(rect, self.image, rect)
 
     def get_image(self):
         return self.image
 
+class MatplotlibWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.figure = Figure(figsize=(5, 3), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)
+        self.figure.patch.set_facecolor(COLORS["bg"])
+        self.ax.set_facecolor(COLORS["bg"])
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.canvas)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+
+    def plot_confidence(self, characters, confidences):
+        self.ax.clear()
+
+        # Bar chart
+        bars = self.ax.bar(characters, confidences, color=COLORS["accent"])
+
+        # Formatting
+        self.ax.set_ylim(0, 100)
+        self.ax.set_ylabel('Độ tin cậy (%)', color=COLORS["text_secondary"])
+        self.ax.tick_params(axis='x', colors=COLORS["text_primary"])
+        self.ax.tick_params(axis='y', colors=COLORS["text_secondary"])
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.spines['bottom'].set_color(COLORS["border"])
+        self.ax.spines['left'].set_color(COLORS["border"])
+
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            self.ax.text(bar.get_x() + bar.get_width()/2., height,
+                         f'{height:.1f}%',
+                         ha='center', va='bottom', color=COLORS["text_primary"], fontsize=8)
+
+        self.canvas.draw()
+
 class HandwritingApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI Studio Nhận Diện Chữ Viết")
-        self.setGeometry(100, 100, 1100, 750)
+        self.setGeometry(100, 100, 1200, 800)
         self.setStyleSheet(STYLESHEET)
 
         self.model = None
@@ -211,8 +260,30 @@ class HandwritingApp(QMainWindow):
         self.easyocr_reader = None
         self.last_img_cnn = None
 
+        # Notification Timer
+        self.notification_timer = QTimer()
+        self.notification_timer.setSingleShot(True)
+        self.notification_timer.timeout.connect(self.hide_notification)
+
         self.load_model()
         self.init_ui()
+
+    def show_notification(self, message, type="info"):
+        self.lbl_notification.setText(message)
+        if type == "success":
+            self.lbl_notification.setStyleSheet(f"background-color: {COLORS['success']}; color: white; border-radius: 8px; padding: 10px;")
+        elif type == "error":
+            self.lbl_notification.setStyleSheet(f"background-color: {COLORS['danger']}; color: white; border-radius: 8px; padding: 10px;")
+        elif type == "warning":
+            self.lbl_notification.setStyleSheet(f"background-color: {COLORS['warning']}; color: white; border-radius: 8px; padding: 10px;")
+        else:
+            self.lbl_notification.setStyleSheet(f"background-color: {COLORS['accent']}; color: white; border-radius: 8px; padding: 10px;")
+
+        self.lbl_notification.setVisible(True)
+        self.notification_timer.start(3000) # Hide after 3 seconds
+
+    def hide_notification(self):
+        self.lbl_notification.setVisible(False)
 
     def load_model(self):
         try:
@@ -220,7 +291,8 @@ class HandwritingApp(QMainWindow):
             label_path = 'model/label_map.json'
 
             if not os.path.exists(model_path) or not os.path.exists(label_path):
-                QMessageBox.critical(self, "Lỗi Hệ Thống", "Không tìm thấy file mô hình. Vui lòng chạy script huấn luyện trước.")
+                # We can't use show_notification yet as UI isn't init, so use print or delayed init
+                print("Lỗi Hệ Thống: Không tìm thấy file mô hình.")
                 return
 
             self.model = keras.models.load_model(model_path)
@@ -230,7 +302,7 @@ class HandwritingApp(QMainWindow):
             self.char_to_index = {v: k for k, v in self.label_map.items()}
             print("Hệ thống: Đã tải mô hình.")
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi", f"Không thể tải mô hình: {e}")
+            print(f"Lỗi: Không thể tải mô hình: {e}")
 
     def get_easyocr_reader(self):
         if self.easyocr_reader is None:
@@ -263,6 +335,13 @@ class HandwritingApp(QMainWindow):
 
         main_layout.addLayout(header_layout)
 
+        # --- Notification Area ---
+        self.lbl_notification = QLabel("")
+        self.lbl_notification.setObjectName("notification")
+        self.lbl_notification.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_notification.setVisible(False)
+        main_layout.addWidget(self.lbl_notification)
+
         # --- Main Content Area (2 Columns) ---
         content_layout = QHBoxLayout()
 
@@ -286,7 +365,7 @@ class HandwritingApp(QMainWindow):
         right_card.setObjectName("card")
         right_layout = QVBoxLayout(right_card)
         right_layout.setContentsMargins(25, 25, 25, 25)
-        right_layout.setSpacing(20)
+        right_layout.setSpacing(15)
 
         # 1. Configuration Section
         lbl_config = QLabel("Cấu hình")
@@ -346,6 +425,12 @@ class HandwritingApp(QMainWindow):
         self.lbl_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_result.setWordWrap(True)
         right_layout.addWidget(self.lbl_result)
+
+        # Chart Widget
+        self.chart_widget = MatplotlibWidget()
+        self.chart_widget.setFixedHeight(200)
+        self.chart_widget.setVisible(False) # Hidden initially
+        right_layout.addWidget(self.chart_widget)
 
         # Retrain Button (Hidden)
         self.btn_retrain = QPushButton("Sửa lỗi & Dạy lại AI")
@@ -425,7 +510,7 @@ class HandwritingApp(QMainWindow):
             img = Image.fromarray(arr).convert('L')
         else: # Upload Tab
             if not hasattr(self, 'uploaded_image') or self.uploaded_image is None:
-                QMessageBox.warning(self, "Cảnh báo", "Vui lòng tải ảnh lên trước.")
+                self.show_notification("Vui lòng tải ảnh lên trước.", "warning")
                 return
             img = self.uploaded_image
 
@@ -441,9 +526,8 @@ class HandwritingApp(QMainWindow):
                 self.image_display.setText("")
 
                 self.uploaded_image = Image.open(file_name).convert('L')
-                # Auto predict? No, let user click button for consistency in this UI
             except Exception as e:
-                QMessageBox.critical(self, "Lỗi", f"Không thể tải ảnh: {e}")
+                self.show_notification(f"Không thể tải ảnh: {e}", "error")
 
     def save_drawing(self):
         file_name, _ = QFileDialog.getSaveFileName(self, "Lưu Ảnh", "", "PNG Files (*.png);;JPEG Files (*.jpg)")
@@ -451,30 +535,87 @@ class HandwritingApp(QMainWindow):
             if not file_name.endswith(('.png', '.jpg', '.jpeg')):
                 file_name += '.png'
             self.canvas.get_image().save(file_name)
-            QMessageBox.information(self, "Đã lưu", f"Ảnh đã được lưu tại:\n{file_name}")
+            self.show_notification(f"Ảnh đã được lưu tại: {file_name}", "success")
+
+    def segment_characters(self, img_pil):
+        # 1. Thresholding
+        img_np = np.array(img_pil)
+        # Invert if background is white (which is standard for drawing canvas)
+        if np.mean(img_np) > 127:
+            img_np = 255 - img_np
+
+        # Binary threshold (manual implementation to avoid cv2 dependency if not installed, though numpy is enough)
+        # Simple thresholding
+        thresh = (img_np > 100).astype(np.uint8) * 255
+
+        # 2. Vertical Projection Profile
+        vertical_projection = np.sum(thresh, axis=0)
+
+        # 3. Find gaps
+        segments = []
+        start = -1
+        for i, val in enumerate(vertical_projection):
+            if val > 0 and start == -1:
+                start = i
+            elif val == 0 and start != -1:
+                segments.append((start, i))
+                start = -1
+        if start != -1:
+            segments.append((start, len(vertical_projection)))
+
+        # 4. Extract sub-images
+        char_images = []
+        for (x1, x2) in segments:
+            # Add some padding
+            x1 = max(0, x1 - 2)
+            x2 = min(img_np.shape[1], x2 + 2)
+
+            # Crop
+            char_crop = img_np[:, x1:x2]
+
+            # Remove empty rows (top/bottom)
+            horiz_proj = np.sum(char_crop, axis=1)
+            y_indices = np.where(horiz_proj > 0)[0]
+            if len(y_indices) > 0:
+                y1, y2 = y_indices[0], y_indices[-1]
+                y1 = max(0, y1 - 2)
+                y2 = min(img_np.shape[0], y2 + 2)
+                char_crop = char_crop[y1:y2, :]
+
+            # Convert back to PIL and preprocess
+            char_pil = Image.fromarray(char_crop)
+            char_images.append(char_pil)
+
+        return char_images
+
+    def preprocess_char(self, img_pil):
+        # Resize to fit in 20x20 box while preserving aspect ratio
+        img = img_pil.copy()
+        img.thumbnail((20, 20), Image.Resampling.LANCZOS)
+
+        # Create 28x28 black canvas
+        new_img = Image.new('L', (28, 28), 0) # 0 is black
+
+        # Paste centered
+        offset_x = (28 - img.width) // 2
+        offset_y = (28 - img.height) // 2
+        new_img.paste(img, (offset_x, offset_y))
+
+        return new_img
 
     def process_prediction(self, img_pil):
         # Prepare images
         img_tess = img_pil.copy() # Black text on white
-
-        # For CNN: Invert if needed
-        np_img = np.array(img_pil)
-        if np.mean(np_img) > 127:
-            img_cnn = ImageOps.invert(img_pil)
-        else:
-            img_cnn = img_pil.copy()
-        img_cnn = img_cnn.resize((28, 28))
-
-        self.last_img_cnn = img_cnn # Save for retraining
 
         # Get selected engine
         engine = self.combo_engine.currentText()
 
         result_text = ""
         self.btn_retrain.setVisible(False)
+        self.chart_widget.setVisible(False)
 
         if engine == "Custom AI (CNN)":
-            result_text = self.predict_cnn(img_cnn)
+            result_text = self.predict_cnn(img_pil)
             self.btn_retrain.setVisible(True)
         elif engine == "Tesseract OCR":
             result_text = self.predict_tesseract(img_tess)
@@ -487,38 +628,67 @@ class HandwritingApp(QMainWindow):
         if self.model is None:
             return "Chưa tải mô hình"
 
-        img_arr = np.array(img_cnn_pil)
-        img_arr = img_arr.astype('float32') / 255.0
-        img_arr = np.expand_dims(img_arr, axis=-1)
-        img_arr = np.expand_dims(img_arr, axis=0)
+        # Segment characters
+        char_imgs = self.segment_characters(img_cnn_pil)
 
-        prediction = self.model.predict(img_arr)[0]
+        if not char_imgs:
+            return "Không tìm thấy ký tự"
 
-        valid_indices = []
-        if self.rb_num.isChecked():
-            valid_indices = list(range(10))
-        elif self.rb_char.isChecked():
-            valid_indices = list(range(10, 47))
-        else:
-            valid_indices = list(range(47))
+        full_text = ""
+        confidences = []
+        chars = []
 
-        masked_prediction = np.copy(prediction)
-        mask = np.ones(masked_prediction.shape, dtype=bool)
-        mask[valid_indices] = False
-        masked_prediction[mask] = -1.0
+        self.last_char_imgs = [] # Store all segments
 
-        predicted_class = np.argmax(masked_prediction)
-        confidence = masked_prediction[predicted_class]
+        for char_img in char_imgs:
+            # Preprocess
+            processed_img = self.preprocess_char(char_img)
+            self.last_char_imgs.append(processed_img)
 
-        cnn_result = self.label_map.get(predicted_class, "?")
-        return f"{cnn_result}\n\nĐộ tin cậy: {confidence*100:.1f}%"
+            img_arr = np.array(processed_img)
+            img_arr = img_arr.astype('float32') / 255.0
+            img_arr = np.expand_dims(img_arr, axis=-1)
+            img_arr = np.expand_dims(img_arr, axis=0)
+
+            prediction = self.model.predict(img_arr, verbose=0)[0]
+
+            valid_indices = []
+            if self.rb_num.isChecked():
+                valid_indices = list(range(10))
+            elif self.rb_char.isChecked():
+                valid_indices = list(range(10, 47))
+            else:
+                valid_indices = list(range(47))
+
+            masked_prediction = np.copy(prediction)
+            mask = np.ones(masked_prediction.shape, dtype=bool)
+            mask[valid_indices] = False
+            masked_prediction[mask] = -1.0
+
+            predicted_class = np.argmax(masked_prediction)
+            confidence = masked_prediction[predicted_class]
+
+            char_result = self.label_map.get(predicted_class, "?")
+            full_text += char_result
+
+            chars.append(char_result)
+            confidences.append(confidence * 100)
+
+        # Update Chart
+        self.chart_widget.plot_confidence(chars, confidences)
+        self.chart_widget.setVisible(True)
+
+        return f"Kết quả: {full_text}"
 
     def predict_tesseract(self, img_pil):
-        tess_config = '--psm 10'
+        tess_config = '--psm 10' # Treat as single character, might need to change for multi
         if self.rb_num.isChecked():
             tess_config += ' -c tessedit_char_whitelist=0123456789'
         elif self.rb_char.isChecked():
             tess_config += ' -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+
+        # For multi-char, psm 7 or 8 might be better
+        tess_config = tess_config.replace('--psm 10', '--psm 7')
 
         try:
             tess_result = pytesseract.image_to_string(img_pil, config=tess_config).strip()
@@ -541,42 +711,48 @@ class HandwritingApp(QMainWindow):
             results = reader.readtext(img_np, detail=0, allowlist=allowlist)
 
             if results:
-                return results[0]
+                return " ".join(results)
             else:
                 return "(Không có kết quả)"
         except Exception as e:
             return f"Lỗi: {e}"
 
     def retrain_model_dialog(self):
-        if self.last_img_cnn is None:
+        if not hasattr(self, 'last_char_imgs') or not self.last_char_imgs:
+            self.show_notification("Không có dữ liệu ảnh gần nhất để dạy.", "warning")
             return
 
-        text, ok = QInputDialog.getText(self, "Dạy AI", "Nhập ký tự đúng (0-9, A-Z, a-z):")
+        num_chars = len(self.last_char_imgs)
+        text, ok = QInputDialog.getText(self, "Dạy AI", f"Nhập chuỗi ký tự đúng ({num_chars} ký tự):")
+
         if ok and text:
-            correct_char = text.strip()
-            if len(correct_char) != 1:
-                QMessageBox.warning(self, "Lỗi", "Vui lòng chỉ nhập đúng 1 ký tự.")
+            correct_text = text.strip()
+
+            if len(correct_text) != num_chars:
+                self.show_notification(f"Số lượng ký tự không khớp! Đã nhận diện {num_chars} ảnh, nhưng bạn nhập {len(correct_text)} ký tự.", "error")
                 return
 
-            if correct_char not in self.char_to_index:
-                if correct_char.swapcase() in self.char_to_index:
-                     correct_char = correct_char.swapcase()
-                else:
-                    QMessageBox.warning(self, "Lỗi", f"Ký tự '{correct_char}' chưa được hỗ trợ.")
-                    return
+            # Validate all characters first
+            for char in correct_text:
+                if char not in self.char_to_index and char.swapcase() not in self.char_to_index:
+                     self.show_notification(f"Ký tự '{char}' chưa được hỗ trợ.", "error")
+                     return
 
-            label_idx = self.char_to_index[correct_char]
+            # Save all images
+            saved_count = 0
+            for i, char in enumerate(correct_text):
+                if char not in self.char_to_index:
+                    char = char.swapcase()
 
-            timestamp = int(time.time())
-            filename = f"user_data/{label_idx}_{timestamp}.png"
-            self.last_img_cnn.save(filename)
+                label_idx = self.char_to_index[char]
+                timestamp = int(time.time()) + i # Add i to ensure unique filenames if fast
+                filename = f"user_data/{label_idx}_{timestamp}.png"
+                self.last_char_imgs[i].save(filename)
+                saved_count += 1
 
-            img_arr = np.array(self.last_img_cnn).astype('float32') / 255.0
-            img_arr = np.expand_dims(img_arr, axis=-1)
-
-            self.perform_retraining(target_img_arr=img_arr, target_label=label_idx)
-
-            QMessageBox.information(self, "Thành công", f"AI đã học ký tự '{correct_char}' thành công!")
+            # Retrain once
+            self.perform_retraining()
+            self.show_notification(f"AI đã học chuỗi '{correct_text}' thành công!", "success")
 
     def perform_retraining(self, target_img_arr=None, target_label=None):
         images = []
