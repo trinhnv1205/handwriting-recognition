@@ -1,0 +1,8 @@
+tensorflow
+numpy
+pillow
+matplotlib
+tensorflow_datasets
+PyQt6
+pytesseract
+easyocr
