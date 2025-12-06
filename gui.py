@@ -156,7 +156,7 @@ class DrawCanvas(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StaticContents)
-        self.setMinimumSize(400, 400)
+        self.setMinimumSize(300, 300)
         self.image = QImage(self.size(), QImage.Format.Format_RGB32)
         self.image.fill(Qt.GlobalColor.white)
         self.drawing = False
@@ -251,7 +251,7 @@ class HandwritingApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI Studio Nhận Diện Chữ Viết")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 900, 600)
         self.setStyleSheet(STYLESHEET)
 
         self.model = None
@@ -313,8 +313,8 @@ class HandwritingApp(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
         # --- Header ---
         header_layout = QHBoxLayout()
@@ -364,7 +364,7 @@ class HandwritingApp(QMainWindow):
         right_card = QFrame()
         right_card.setObjectName("card")
         right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(25, 25, 25, 25)
+        right_layout.setContentsMargins(15, 15, 15, 15)
         right_layout.setSpacing(15)
 
         # 1. Configuration Section
@@ -483,7 +483,8 @@ class HandwritingApp(QMainWindow):
 
         self.image_display = QLabel("Chưa chọn ảnh")
         self.image_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_display.setFixedSize(400, 400)
+        self.image_display.setMinimumSize(300, 300)
+        self.image_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.image_display.setStyleSheet(f"border: 2px dashed {COLORS['border']}; border-radius: 15px; color: {COLORS['text_secondary']};")
 
         btn_upload = QPushButton("Chọn Ảnh")
@@ -540,51 +541,94 @@ class HandwritingApp(QMainWindow):
     def segment_characters(self, img_pil):
         # 1. Thresholding
         img_np = np.array(img_pil)
-        # Invert if background is white (which is standard for drawing canvas)
-        if np.mean(img_np) > 127:
-            img_np = 255 - img_np
 
-        # Binary threshold (manual implementation to avoid cv2 dependency if not installed, though numpy is enough)
-        # Simple thresholding
-        thresh = (img_np > 100).astype(np.uint8) * 255
+        # Convert to grayscale if RGB
+        if len(img_np.shape) == 3:
+            # Simple average or weighted
+            gray = np.mean(img_np, axis=2).astype(np.uint8)
+        else:
+            gray = img_np
 
-        # 2. Vertical Projection Profile
-        vertical_projection = np.sum(thresh, axis=0)
+        # Invert if background is white (standard for drawing)
+        # Check corners or mean to decide
+        if np.mean(gray) > 127:
+            gray = 255 - gray
 
-        # 3. Find gaps
-        segments = []
+        # Binary threshold
+        thresh = (gray > 100).astype(np.uint8) * 255
+
+        # 2. Horizontal Projection to find lines
+        h_proj = np.sum(thresh, axis=1)
+        h_h, h_w = thresh.shape
+
+        lines = []
         start = -1
-        for i, val in enumerate(vertical_projection):
+        for i, val in enumerate(h_proj):
             if val > 0 and start == -1:
                 start = i
             elif val == 0 and start != -1:
-                segments.append((start, i))
+                if i - start > 5: # Min line height
+                    lines.append((start, i))
                 start = -1
         if start != -1:
-            segments.append((start, len(vertical_projection)))
+            if h_h - start > 5:
+                lines.append((start, h_h))
 
-        # 4. Extract sub-images
+        # If no lines found, try whole image
+        if not lines:
+            lines = [(0, h_h)]
+
+        # 3. Process each line to find characters
         char_images = []
-        for (x1, x2) in segments:
-            # Add some padding
-            x1 = max(0, x1 - 2)
-            x2 = min(img_np.shape[1], x2 + 2)
 
-            # Crop
-            char_crop = img_np[:, x1:x2]
+        for (y1, y2) in lines:
+            # Crop line
+            line_img = thresh[y1:y2, :]
+            line_orig = img_np[y1:y2, :] # Crop from original
 
-            # Remove empty rows (top/bottom)
-            horiz_proj = np.sum(char_crop, axis=1)
-            y_indices = np.where(horiz_proj > 0)[0]
-            if len(y_indices) > 0:
-                y1, y2 = y_indices[0], y_indices[-1]
-                y1 = max(0, y1 - 2)
-                y2 = min(img_np.shape[0], y2 + 2)
-                char_crop = char_crop[y1:y2, :]
+            # Vertical Projection for this line
+            v_proj = np.sum(line_img, axis=0)
 
-            # Convert back to PIL and preprocess
-            char_pil = Image.fromarray(char_crop)
-            char_images.append(char_pil)
+            # Find gaps
+            segments = []
+            start_x = -1
+            for j, val in enumerate(v_proj):
+                if val > 0 and start_x == -1:
+                    start_x = j
+                elif val == 0 and start_x != -1:
+                    if j - start_x > 2: # Min char width
+                        segments.append((start_x, j))
+                    start_x = -1
+            if start_x != -1:
+                if line_img.shape[1] - start_x > 2:
+                    segments.append((start_x, line_img.shape[1]))
+
+            # Extract chars from this line
+            line_chars = []
+            for (x1, x2) in segments:
+                # Add padding
+                pad = 2
+                x1_p = max(0, x1 - pad)
+                x2_p = min(line_orig.shape[1], x2 + pad)
+
+                char_crop = line_orig[:, x1_p:x2_p]
+
+                # Use the binary mask for projection to trim top/bottom
+                char_mask = line_img[:, x1_p:x2_p]
+                char_h_proj = np.sum(char_mask, axis=1)
+                y_indices = np.where(char_h_proj > 0)[0]
+
+                if len(y_indices) > 0:
+                    cy1, cy2 = y_indices[0], y_indices[-1]
+                    cy1 = max(0, cy1 - 2)
+                    cy2 = min(char_crop.shape[0], cy2 + 2)
+                    char_crop = char_crop[cy1:cy2, :]
+
+                # Convert back to PIL
+                char_pil = Image.fromarray(char_crop)
+                line_chars.append(char_pil)
+
+            char_images.extend(line_chars)
 
         return char_images
 
@@ -592,8 +636,6 @@ class HandwritingApp(QMainWindow):
         # Resize to fit in 20x20 box while preserving aspect ratio
         img = img_pil.copy()
         img.thumbnail((20, 20), Image.Resampling.LANCZOS)
-
-        # Create 28x28 black canvas
         new_img = Image.new('L', (28, 28), 0) # 0 is black
 
         # Paste centered
@@ -729,7 +771,7 @@ class HandwritingApp(QMainWindow):
             correct_text = text.strip()
 
             if len(correct_text) != num_chars:
-                self.show_notification(f"Số lượng ký tự không khớp! Đã nhận diện {num_chars} ảnh, nhưng bạn nhập {len(correct_text)} ký tự.", "error")
+                self.show_notification(f"Lỗi: Ảnh được chia thành {num_chars} phần, nhưng bạn nhập {len(correct_text)} ký tự. Vui lòng vẽ/chụp rõ hơn để tách rời các ký tự.", "error")
                 return
 
             # Validate all characters first
